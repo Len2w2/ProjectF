@@ -4,13 +4,13 @@
 #include <string>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 class SocketCommunicatie {
 private:
     std::string ipAdresDoel;
     int poort;
-    bool isVerbonden;
-
+    std::atomic<bool> isVerbonden; 
     int server_fd;
     std::string laatsteData;
     std::mutex data_mutex;
@@ -21,7 +21,7 @@ public:
     ~SocketCommunicatie();
 
     bool verbind();
-    void verzendData(std::string bericht);
+    void verzendData(const std::string& bericht);
     std::string ontvangData();
     bool checkConnectieStatus();
 };
