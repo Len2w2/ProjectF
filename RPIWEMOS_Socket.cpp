@@ -1,18 +1,18 @@
 #include "RPIWEMOS_Socket.h"
 #include <iostream>
 #include <thread>
+#include <array>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <cstring>
 
-SocketCommunicatie::SocketCommunicatie(std::string ip, int p) {
-    ipAdresDoel = 10.0.0.1;
-    poort = 50001;
-    isVerbonden = false;
-    server_fd = -1;
-    laatsteOntvangstTijd = std::chrono::steady_clock::now();
+using namespace std;
+using namespace std::chrono;
+
+SocketCommunicatie::SocketCommunicatie(string ip, int p) 
+    : ipAdresDoel(move(ip)), poort(p), isVerbonden(false), server_fd(-1) {
+    laatsteOntvangstTijd = steady_clock::now();
 }
 
 SocketCommunicatie::~SocketCommunicatie() {
@@ -21,7 +21,7 @@ SocketCommunicatie::~SocketCommunicatie() {
 }
 
 bool SocketCommunicatie::verbind() {
-    struct sockaddr_in address;
+    struct sockaddr_in address{}; 
     int opt = 1;
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -37,50 +37,51 @@ bool SocketCommunicatie::verbind() {
     if (listen(server_fd, 3) < 0) return false;
 
     isVerbonden = true;
-    laatsteOntvangstTijd = std::chrono::steady_clock::now();
+    laatsteOntvangstTijd = steady_clock::now();
 
-    std::thread([this]() {
-        struct sockaddr_in client_address;
-        int addrlen = sizeof(client_address);
-        char buffer[1024] = {0};
+    thread([this]() {
+        struct sockaddr_in client_address{};
+        socklen_t addrlen = sizeof(client_address);
+        array<char, 1024> buffer{}; 
 
         while (this->isVerbonden) {
-            int new_socket = accept(this->server_fd, (struct sockaddr*)&client_address, (socklen_t*)&addrlen);
+            int new_socket = accept(this->server_fd, (struct sockaddr*)&client_address, &addrlen);
             if (new_socket >= 0) {
-                memset(buffer, 0, 1024);
-                read(new_socket, buffer, 1024);
-                std::string ontvangen(buffer);
+                buffer.fill(0); 
+                ssize_t bytesRead = read(new_socket, buffer.data(), buffer.size() - 1);
+                
+                if (bytesRead > 0) {
+                    string ontvangen(buffer.data(), bytesRead);
+                    this->laatsteOntvangstTijd = steady_clock::now();
 
-                this->laatsteOntvangstTijd = std::chrono::steady_clock::now();
-
-                if (ontvangen.find("Heartbeat") == std::string::npos) {
-                    std::lock_guard<std::mutex> lock(this->data_mutex);
-                    this->laatsteData = ontvangen;
-                    std::cout << "\n[Nieuwe Data Ontvangen]: " << ontvangen << std::endl;
-                } else {
-                    std::cout << "[Heartbeat Ontvangen]: " << ontvangen << std::endl;
+                    if (ontvangen.find("Heartbeat") == string::npos) {
+                        lock_guard<mutex> lock(this->data_mutex);
+                        this->laatsteData = ontvangen;
+                        cout << "\n[WEMOS - Nieuwe Data Ontvangen]: " << ontvangen << endl;
+                    } else {
+                        cout << "[WEMOS - Heartbeat Ontvangen]: " << ontvangen << endl;
+                    }
                 }
                 close(new_socket);
             }
         }
     }).detach();
 
-    std::thread([this]() {
+    thread([this]() {
         while (this->isVerbonden) {
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-            this->verzendData("Heartbeat: Pi is online.");
+            this_thread::sleep_for(seconds(2));
+            this->verzendData("Heartbeat: WEMOS Pi is online.");
         }
     }).detach();
 
     return true;
 }
 
-void SocketCommunicatie::verzendData(std::string bericht) {
-    int sock = 0;
-    struct sockaddr_in serv_addr;
+void SocketCommunicatie::verzendData(const string& bericht) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return;
 
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) return;
-
+    struct sockaddr_in serv_addr{};
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(poort);
 
@@ -95,20 +96,20 @@ void SocketCommunicatie::verzendData(std::string bericht) {
     close(sock);
 }
 
-std::string SocketCommunicatie::ontvangData() {
-    std::lock_guard<std::mutex> lock(data_mutex);
-    std::string data = laatsteData;
-    laatsteData = ""; 
+string SocketCommunicatie::ontvangData() {
+    lock_guard<mutex> lock(data_mutex);
+    string data = laatsteData;
+    laatsteData.clear(); 
     return data;
 }
 
 bool SocketCommunicatie::checkConnectieStatus() {
-    auto nu = std::chrono::steady_clock::now();
-    auto verstreken = std::chrono::duration_cast<std::chrono::seconds>(nu - laatsteOntvangstTijd).count();
+    auto nu = steady_clock::now();
+    auto verstreken = duration_cast<seconds>(nu - laatsteOntvangstTijd).count();
 
     if (verstreken > 5) {
         if (isVerbonden) {
-            std::cout << "\n[FOUT] Communicatie langer dan 5 sec weggevallen!" << std::endl;
+            cout << "\n[FOUT] WEMOS Communicatie langer dan 5 sec weggevallen!" << endl;
         }
         isVerbonden = false;
     } else {
